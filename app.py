@@ -228,8 +228,14 @@ with tab3:
     for f in os.listdir("overspeed_captures"):
         if f.endswith(".jpg"):
             if view_mode=="Overspeed Only":
-                m=re.search(r"_(\d+)\.jpg$",f)
-                if m and int(m.group(1))<=speed_limit: continue
+                # Safely extract speed
+                try:
+                    m = re.search(r"_(\d+)\.jpg$", f)
+                    speed = int(m.group(1)) if m else 0
+                except:
+                    speed = 0
+                if speed <= speed_limit:
+                    continue
             image_files.append(f)
     image_files=sorted(image_files)
 
@@ -245,12 +251,18 @@ with tab3:
                     img_path = os.path.join("overspeed_captures", img_file)
                     cols[c].image(img_path, caption=img_file, use_container_width=True)
                     col_del, col_warn = cols[c].columns([1,1])
+                    # Delete button
                     with col_del:
                         if st.button(f"🗑️ Delete {img_file}", key=f"del_{img_file}"):
                             os.remove(img_path)
                             st.experimental_rerun()
+                    # Overspeed indicator
                     with col_warn:
-                        speed = int(re.search(r"_(\d+)\.jpg$",img_file).group(1))
+                        try:
+                            m = re.search(r"_(\d+)\.jpg$", img_file)
+                            speed = int(m.group(1)) if m else 0
+                        except:
+                            speed = 0
                         if view_mode=="Overspeed Only" or speed>speed_limit:
                             cols[c].markdown("⚠️ Overspeed Vehicle")
     else:
