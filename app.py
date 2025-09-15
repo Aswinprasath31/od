@@ -47,25 +47,24 @@ tab1, tab2, tab3 = st.tabs(["📡 Detection", "📊 Dashboard", "📷 Overspeed 
 with tab1:
     st.subheader("YOLO Vehicle Detection + Speed Estimation")
 
-    # Status
     status_text = "🟢 Running" if st.session_state.detecting else "🔴 Stopped"
     st.markdown(f"**Status:** {status_text}")
 
     mode = st.radio("Select Input Source", ["Webcam", "Upload Video"])
     stframe = st.empty()
 
-    # ===== Webcam Mode =====
+    # Webcam Mode
     if mode == "Webcam":
         if st.button("▶️ Start Webcam Detection") and not st.session_state.detecting:
             st.session_state.cap = cv2.VideoCapture(0)
             st.session_state.detecting = True
 
-    # ===== Upload Video Mode =====
+    # Upload Video Mode
     else:
         uploaded_file = st.file_uploader("Upload a video", type=["mp4", "avi", "mov"])
         if uploaded_file:
             st.session_state.uploaded_video = uploaded_file
-            st.session_state.frame_num = 0  # reset frame counter
+            st.session_state.frame_num = 0
 
         if st.session_state.uploaded_video and not st.session_state.detecting:
             tfile = "temp_video.mp4"
@@ -77,7 +76,7 @@ with tab1:
             progress_bar = st.progress(0)
             total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
 
-    # ===== Detection Loop =====
+    # Detection Loop
     if st.session_state.detecting and st.session_state.cap:
         cap = st.session_state.cap
         while st.session_state.detecting:
@@ -96,31 +95,27 @@ with tab1:
                     label = model.names[cls_id]
                     speed = estimate_speed()
 
-                    # Draw detection
                     x1, y1, x2, y2 = map(int, box.xyxy[0])
                     cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
                     cv2.putText(frame, f"{label} {speed} km/h", (x1, y1 - 10),
                                 cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
 
-                    # Save logbook entry
                     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                     new_data = pd.DataFrame([[timestamp, label, speed]],
                                             columns=["timestamp", "vehicle_type", "speed_kmph"])
                     new_data.to_csv(logbook_file, mode="a", header=False, index=False)
 
-                    # Save overspeed capture
                     if speed > 60:
                         filename = f"overspeed_captures/{timestamp.replace(':','-')}_{label}_{speed}.jpg"
                         cv2.imwrite(filename, frame)
 
             stframe.image(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB), channels="RGB")
 
-            # Update progress bar if video
             if mode == "Upload Video":
                 st.session_state.frame_num += 1
                 progress_bar.progress(min(st.session_state.frame_num / total_frames, 1.0))
 
-    # ===== Stop Button =====
+    # Stop Button
     if st.session_state.detecting and st.button("⏹️ Stop Detection"):
         st.session_state.detecting = False
         if st.session_state.cap:
@@ -132,7 +127,11 @@ with tab1:
 # ====================== Dashboard Tab ==========================
 with tab2:
     st.subheader("Traffic Monitoring Dashboard")
-    st.autorefresh(interval=5000, key="refresh_dashboard")  # <-- Updated here
+    # Use st.autorefresh safely if available
+    try:
+        st.autorefresh(interval=5000, key="refresh_dashboard")
+    except AttributeError:
+        st.info("Manual refresh required (update Streamlit to >=1.26 for auto-refresh).")
 
     if os.path.exists(logbook_file):
         try:
@@ -176,7 +175,6 @@ with tab2:
     else:
         st.error("⚠️ No logbook found. Run detection first.")
 
-    # Clear Data Button
     if st.button("🗑️ Clear All Data"):
         df_empty = pd.DataFrame(columns=["timestamp", "vehicle_type", "speed_kmph"])
         df_empty.to_csv(logbook_file, index=False)
@@ -190,7 +188,10 @@ with tab2:
 # ====================== Overspeed Gallery Tab ==========================
 with tab3:
     st.subheader("📷 Overspeed Captures Gallery")
-    st.autorefresh(interval=7000, key="refresh_gallery")  # <-- Updated here
+    try:
+        st.autorefresh(interval=7000, key="refresh_gallery")
+    except AttributeError:
+        st.info("Manual refresh required (update Streamlit to >=1.26 for auto-refresh).")
 
     image_files = sorted([f for f in os.listdir("overspeed_captures") if f.endswith(".jpg")])
     if image_files:
