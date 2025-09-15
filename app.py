@@ -7,7 +7,6 @@ import altair as alt
 from datetime import datetime
 from ultralytics import YOLO
 import shutil
-from streamlit_autorefresh import st_autorefresh
 
 # ===== AUTO-CREATE FOLDER + CSV =====
 os.makedirs("overspeed_captures", exist_ok=True)
@@ -118,9 +117,6 @@ with tab1:
 # ====================== Dashboard Tab ==========================
 with tab2:
     st.subheader("Traffic Monitoring Dashboard")
-
-    # Auto-refresh every 5s
-    st_autorefresh(interval=5000, key="refresh_dashboard")
 
     if os.path.exists(logbook_file):
         try:
