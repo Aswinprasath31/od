@@ -6,7 +6,6 @@ import streamlit as st
 import altair as alt
 from datetime import datetime
 from ultralytics import YOLO
-import shutil
 
 # ===== AUTO-CREATE FOLDER + CSV =====
 os.makedirs("overspeed_captures", exist_ok=True)
@@ -34,6 +33,8 @@ if "uploaded_video" not in st.session_state:
     st.session_state.uploaded_video = None
 if "cap" not in st.session_state:
     st.session_state.cap = None
+if "frame_num" not in st.session_state:
+    st.session_state.frame_num = 0
 
 # ===== Streamlit UI =====
 st.set_page_config(page_title="Traffic Monitoring System", layout="wide")
@@ -63,7 +64,8 @@ with tab1:
     else:
         uploaded_file = st.file_uploader("Upload a video", type=["mp4", "avi", "mov"])
         if uploaded_file:
-            st.session_state.uploaded_video = uploaded_file  # persist uploaded file
+            st.session_state.uploaded_video = uploaded_file
+            st.session_state.frame_num = 0  # reset frame counter
 
         if st.session_state.uploaded_video and not st.session_state.detecting:
             tfile = "temp_video.mp4"
@@ -74,7 +76,6 @@ with tab1:
             st.session_state.detecting = True
             progress_bar = st.progress(0)
             total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-            frame_num = 0
 
     # ===== Detection Loop =====
     if st.session_state.detecting and st.session_state.cap:
@@ -84,6 +85,7 @@ with tab1:
             if not ret:
                 st.success("✅ Detection finished.")
                 st.session_state.detecting = False
+                st.session_state.cap = None
                 break
 
             results = model(frame)
@@ -115,13 +117,8 @@ with tab1:
 
             # Update progress bar if video
             if mode == "Upload Video":
-                frame_num += 1
-                progress_bar.progress(min(frame_num / total_frames, 1.0))
-
-        # Release cap when done
-        cap.release()
-        st.session_state.cap = None
-        st.session_state.detecting = False
+                st.session_state.frame_num += 1
+                progress_bar.progress(min(st.session_state.frame_num / total_frames, 1.0))
 
     # ===== Stop Button =====
     if st.session_state.detecting and st.button("⏹️ Stop Detection"):
@@ -186,6 +183,7 @@ with tab2:
         if os.path.exists("overspeed_captures"):
             for f in os.listdir("overspeed_captures"):
                 os.remove(os.path.join("overspeed_captures", f))
+        st.session_state.frame_num = 0
         st.success("✅ Logbook reset and overspeed captures cleared!")
 
 # -------------------------------------------------------------------
