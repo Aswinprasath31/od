@@ -177,9 +177,6 @@ with tab2:
 with tab3:
     st.subheader("📷 Overspeed Captures Gallery")
 
-    # Auto-refresh every 7s
-    st_autorefresh(interval=7000, key="refresh_gallery")
-
     image_files = sorted([f for f in os.listdir("overspeed_captures") if f.endswith(".jpg")])
 
     if image_files:
