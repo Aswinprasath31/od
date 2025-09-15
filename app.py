@@ -17,7 +17,6 @@ if not os.path.exists(logbook_file):
 @st.cache_resource
 def load_model():
     return YOLO("yolov8n.pt")
-
 model = load_model()
 
 # ===== Initialize session state =====
@@ -136,7 +135,7 @@ with tab1:
                     pd.DataFrame([[timestamp,label,int(speed_kmph)]],columns=["timestamp","vehicle_type","speed_kmph"]).to_csv(
                         logbook_file,mode="a",header=False,index=False)
 
-                    # Overspeed capture
+                    # Save overspeed capture
                     filename=f"overspeed_captures/{timestamp.replace(':','-')}_{label}_{int(speed_kmph)}.jpg"
                     cv2.imwrite(filename,frame)
 
@@ -211,9 +210,9 @@ with tab2:
         st.session_state.frame_num=0
         st.success("✅ Logbook reset and overspeed captures cleared!")
 
-# ====================== Overspeed Gallery Tab ==========================
+# ====================== Overspeed Gallery Tab (Grid View) ==========================
 with tab3:
-    st.subheader("📷 Overspeed Captures Gallery")
+    st.subheader("📷 Overspeed Captures Gallery (Grid View)")
 
     view_mode = st.radio("View Mode", ["All Captures","Overspeed Only"])
     image_files=[]
@@ -226,16 +225,24 @@ with tab3:
     image_files=sorted(image_files)
 
     if image_files:
-        for img_file in image_files:
-            img_path=os.path.join("overspeed_captures",img_file)
-            st.image(img_path,caption=img_file,use_container_width=True)
-            col1,col2=st.columns(2)
-            with col1:
-                if st.button(f"🗑️ Delete {img_file}"):
-                    os.remove(img_path)
-                    st.experimental_rerun()
-            with col2:
-                if view_mode=="Overspeed Only" or int(re.search(r"_(\d+)\.jpg$",img_file).group(1))>speed_limit:
-                    st.write("⚠️ Overspeed Vehicle")
+        n_cols = 3  # Number of columns in grid
+        rows = (len(image_files) + n_cols - 1) // n_cols
+        for r in range(rows):
+            cols = st.columns(n_cols)
+            for c in range(n_cols):
+                idx = r*n_cols + c
+                if idx < len(image_files):
+                    img_file = image_files[idx]
+                    img_path = os.path.join("overspeed_captures", img_file)
+                    cols[c].image(img_path, caption=img_file, use_container_width=True)
+                    col_del, col_warn = cols[c].columns([1,1])
+                    with col_del:
+                        if st.button(f"🗑️ Delete {img_file}", key=f"del_{img_file}"):
+                            os.remove(img_path)
+                            st.experimental_rerun()
+                    with col_warn:
+                        speed = int(re.search(r"_(\d+)\.jpg$",img_file).group(1))
+                        if view_mode=="Overspeed Only" or speed>speed_limit:
+                            cols[c].markdown("⚠️ Overspeed Vehicle")
     else:
         st.info("No captures yet. Run detection first.")
