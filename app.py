@@ -9,9 +9,6 @@ CAPTURE_FOLDER = "overspeed_captures"
 st.set_page_config(page_title="Traffic Monitoring Dashboard", layout="wide")
 st.title("🚦 Traffic Monitoring Dashboard")
 
-# Auto-refresh every 5 seconds
-st.experimental_autorefresh(interval=5000, limit=None)
-
 # Load CSV
 if os.path.exists(CSV_FILE):
     df = pd.read_csv(CSV_FILE)
