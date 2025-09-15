@@ -7,7 +7,6 @@ import altair as alt
 from datetime import datetime
 from ultralytics import YOLO
 import shutil
-from streamlit_autorefresh import st_autorefresh
 
 # ===== AUTO-CREATE FOLDER + CSV =====
 os.makedirs("overspeed_captures", exist_ok=True)
@@ -20,13 +19,21 @@ if not os.path.exists(logbook_file):
 # ===== Load YOLO model once =====
 @st.cache_resource
 def load_model():
-    return YOLO("yolov8n.pt")  # nano for faster inference
+    return YOLO("yolov8n.pt")  # nano for speed
 
 model = load_model()
 
 # ===== Fake speed function =====
 def estimate_speed():
     return round(20 + 80 * (time.time() % 1), 2)
+
+# ===== Initialize session state =====
+if "detecting" not in st.session_state:
+    st.session_state.detecting = False
+if "uploaded_video" not in st.session_state:
+    st.session_state.uploaded_video = None
+if "cap" not in st.session_state:
+    st.session_state.cap = None
 
 # ===== Streamlit UI =====
 st.set_page_config(page_title="Traffic Monitoring System", layout="wide")
@@ -39,15 +46,11 @@ tab1, tab2, tab3 = st.tabs(["📡 Detection", "📊 Dashboard", "📷 Overspeed 
 with tab1:
     st.subheader("YOLO Vehicle Detection + Speed Estimation")
 
-    if "detecting" not in st.session_state:
-        st.session_state.detecting = False
-
-    # Status indicator
+    # Status
     status_text = "🟢 Running" if st.session_state.detecting else "🔴 Stopped"
     st.markdown(f"**Status:** {status_text}")
 
     mode = st.radio("Select Input Source", ["Webcam", "Upload Video"])
-
     stframe = st.empty()
 
     # ===== Webcam Mode =====
@@ -59,10 +62,13 @@ with tab1:
     # ===== Upload Video Mode =====
     else:
         uploaded_file = st.file_uploader("Upload a video", type=["mp4", "avi", "mov"])
-        if uploaded_file and not st.session_state.detecting:
+        if uploaded_file:
+            st.session_state.uploaded_video = uploaded_file  # persist uploaded file
+
+        if st.session_state.uploaded_video and not st.session_state.detecting:
             tfile = "temp_video.mp4"
             with open(tfile, "wb") as f:
-                f.write(uploaded_file.read())
+                f.write(st.session_state.uploaded_video.read())
             cap = cv2.VideoCapture(tfile)
             st.session_state.cap = cap
             st.session_state.detecting = True
@@ -70,58 +76,66 @@ with tab1:
             total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
             frame_num = 0
 
-            while st.session_state.detecting:
-                ret, frame = cap.read()
-                if not ret:
-                    st.success("✅ Video processing completed.")
-                    st.session_state.detecting = False
-                    break
+    # ===== Detection Loop =====
+    if st.session_state.detecting and st.session_state.cap:
+        cap = st.session_state.cap
+        while st.session_state.detecting:
+            ret, frame = cap.read()
+            if not ret:
+                st.success("✅ Detection finished.")
+                st.session_state.detecting = False
+                break
 
-                results = model(frame)
+            results = model(frame)
 
-                for r in results:
-                    for box in r.boxes:
-                        cls_id = int(box.cls[0])
-                        label = model.names[cls_id]
-                        speed = estimate_speed()
+            for r in results:
+                for box in r.boxes:
+                    cls_id = int(box.cls[0])
+                    label = model.names[cls_id]
+                    speed = estimate_speed()
 
-                        x1, y1, x2, y2 = map(int, box.xyxy[0])
-                        cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
-                        cv2.putText(frame, f"{label} {speed} km/h", (x1, y1 - 10),
-                                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+                    # Draw detection
+                    x1, y1, x2, y2 = map(int, box.xyxy[0])
+                    cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                    cv2.putText(frame, f"{label} {speed} km/h", (x1, y1 - 10),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
 
-                        # Save logbook entry
-                        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                        new_data = pd.DataFrame([[timestamp, label, speed]],
-                                                columns=["timestamp", "vehicle_type", "speed_kmph"])
-                        new_data.to_csv(logbook_file, mode="a", header=False, index=False)
+                    # Save logbook entry
+                    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    new_data = pd.DataFrame([[timestamp, label, speed]],
+                                            columns=["timestamp", "vehicle_type", "speed_kmph"])
+                    new_data.to_csv(logbook_file, mode="a", header=False, index=False)
 
-                        # Save overspeed capture
-                        if speed > 60:
-                            filename = f"overspeed_captures/{timestamp.replace(':','-')}_{label}_{speed}.jpg"
-                            cv2.imwrite(filename, frame)
+                    # Save overspeed capture
+                    if speed > 60:
+                        filename = f"overspeed_captures/{timestamp.replace(':','-')}_{label}_{speed}.jpg"
+                        cv2.imwrite(filename, frame)
 
-                stframe.image(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB), channels="RGB")
+            stframe.image(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB), channels="RGB")
 
+            # Update progress bar if video
+            if mode == "Upload Video":
                 frame_num += 1
                 progress_bar.progress(min(frame_num / total_frames, 1.0))
 
-            cap.release()
-            st.session_state.detecting = False
+        # Release cap when done
+        cap.release()
+        st.session_state.cap = None
+        st.session_state.detecting = False
 
-    # ===== Stop Detection Button =====
+    # ===== Stop Button =====
     if st.session_state.detecting and st.button("⏹️ Stop Detection"):
         st.session_state.detecting = False
-        if "cap" in st.session_state and st.session_state.cap:
+        if st.session_state.cap:
             st.session_state.cap.release()
-            del st.session_state.cap
+            st.session_state.cap = None
         st.success("✅ Detection stopped.")
 
 # -------------------------------------------------------------------
 # ====================== Dashboard Tab ==========================
 with tab2:
     st.subheader("Traffic Monitoring Dashboard")
-    st_autorefresh(interval=5000, key="refresh_dashboard")
+    st.experimental_autorefresh(interval=5000, key="refresh_dashboard")
 
     if os.path.exists(logbook_file):
         try:
@@ -178,7 +192,7 @@ with tab2:
 # ====================== Overspeed Gallery Tab ==========================
 with tab3:
     st.subheader("📷 Overspeed Captures Gallery")
-    st_autorefresh(interval=7000, key="refresh_gallery")
+    st.experimental_autorefresh(interval=7000, key="refresh_gallery")
 
     image_files = sorted([f for f in os.listdir("overspeed_captures") if f.endswith(".jpg")])
     if image_files:
