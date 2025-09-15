@@ -56,6 +56,17 @@ with tab1:
 
     speed_limit = 60  # km/h
 
+    # ===== Speed Calibration Slider =====
+    meters_per_pixel = st.slider(
+        "Speed Calibration (meters per pixel)",
+        min_value=0.01,
+        max_value=0.2,
+        value=0.05,
+        step=0.005,
+        help="Adjust this based on camera distance and field of view for accurate speeds."
+    )
+    st.markdown(f"**Current calibration:** {meters_per_pixel} meters/pixel")
+
     # Webcam
     if mode == "Webcam":
         if st.button("▶️ Start Webcam Detection") and not st.session_state.detecting:
@@ -83,7 +94,6 @@ with tab1:
         cap = st.session_state.cap
         fps = cap.get(cv2.CAP_PROP_FPS) or 30
         frame_time = 1 / fps
-        meters_per_pixel = 0.05
 
         progress_bar = st.empty() if mode == "Upload Video" else None
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) if mode == "Upload Video" else None
@@ -131,7 +141,7 @@ with tab1:
                     else:
                         speed_kmph_raw = 0
 
-                    # ---- Moving average over last 3 frames ----
+                    # ---- 3-frame moving average ----
                     if matched_id not in st.session_state.vehicle_speeds:
                         st.session_state.vehicle_speeds[matched_id] = []
                     st.session_state.vehicle_speeds[matched_id].append(speed_kmph_raw)
