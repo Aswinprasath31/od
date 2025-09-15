@@ -158,20 +158,25 @@ with tab2:
     except AttributeError: st.info("Manual refresh required (Streamlit >=1.26).")
 
     if os.path.exists(logbook_file):
-        df=pd.read_csv(logbook_file)
+        df = pd.read_csv(logbook_file)
         if not df.empty:
             st.write("### Latest Entries")
             st.dataframe(df.tail(10))
 
+            # ---- Vehicle Type Filter ----
+            vehicle_types = df["vehicle_type"].unique().tolist()
+            selected_types = st.multiselect("Filter by Vehicle Type", vehicle_types, default=vehicle_types)
+            filtered_df = df[df["vehicle_type"].isin(selected_types)]
+
             # ---- Overspeed metric ----
-            overspeed_count = df[df["speed_kmph"]>speed_limit].shape[0]
+            overspeed_count = filtered_df[filtered_df["speed_kmph"]>speed_limit].shape[0]
             st.metric("⚠️ Overspeed Vehicles", overspeed_count)
 
             # ---- Per-type overspeed chart ----
-            overspeed_df = df[df["speed_kmph"]>speed_limit]
+            overspeed_df = filtered_df[filtered_df["speed_kmph"]>speed_limit]
             if not overspeed_df.empty:
                 type_counts = overspeed_df["vehicle_type"].value_counts().reset_index()
-                type_counts.columns=["vehicle_type","overspeed_count"]
+                type_counts.columns = ["vehicle_type","overspeed_count"]
                 chart_overspeed_type = alt.Chart(type_counts).mark_bar().encode(
                     x="vehicle_type",
                     y="overspeed_count",
@@ -181,23 +186,27 @@ with tab2:
                 st.altair_chart(chart_overspeed_type,use_container_width=True)
 
             # ---- Vehicle type count chart ----
-            counts=df["vehicle_type"].value_counts().reset_index()
+            counts = filtered_df["vehicle_type"].value_counts().reset_index()
             counts.columns=["vehicle_type","count"]
-            chart_counts=alt.Chart(counts).mark_bar().encode(
-                x="vehicle_type",y="count",tooltip=["vehicle_type","count"])
+            chart_counts = alt.Chart(counts).mark_bar().encode(
+                x="vehicle_type", y="count", tooltip=["vehicle_type","count"])
             st.altair_chart(chart_counts,use_container_width=True)
 
             # ---- Speed distribution chart ----
-            chart_speed=alt.Chart(df).mark_bar().encode(
-                x=alt.X("speed_kmph:Q",bin=True),
+            chart_speed = alt.Chart(filtered_df).mark_bar().encode(
+                x=alt.X("speed_kmph:Q", bin=True),
                 y="count()",
                 tooltip=["count()"]
             )
             st.write("### Speed Distribution")
             st.altair_chart(chart_speed,use_container_width=True)
 
-            st.download_button("📥 Download Full Logbook (CSV)", df.to_csv(index=False).encode("utf-8"),
-                               file_name="traffic_logbook.csv",mime="text/csv")
+            st.download_button(
+                "📥 Download Filtered Logbook (CSV)",
+                filtered_df.to_csv(index=False).encode("utf-8"),
+                file_name="traffic_logbook_filtered.csv",
+                mime="text/csv"
+            )
         else:
             st.warning("⚠️ Logbook is empty. Run detection first.")
     else:
