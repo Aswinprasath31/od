@@ -7,6 +7,7 @@ from datetime import datetime
 import altair as alt
 from ultralytics import YOLO
 import tempfile
+import urllib.request
 
 # =========================
 # CONFIG
@@ -14,6 +15,8 @@ import tempfile
 CSV_FILE = "traffic_logbook.csv"
 CAPTURE_FOLDER = "overspeed_captures"
 SPEED_LIMIT = 60  # Default, user can adjust in sidebar
+DEMO_VIDEO_URL = "https://github.com/ultralytics/assets/releases/download/v0.0.0/highway.mp4"
+DEMO_VIDEO_PATH = "demo_highway.mp4"
 
 os.makedirs(CAPTURE_FOLDER, exist_ok=True)
 
@@ -30,11 +33,10 @@ def log_vehicle(vehicle_id, vehicle_type, speed, overspeed, image_path=""):
                          vehicle_id, vehicle_type, speed, overspeed, image_path])
 
 # =========================
-# VEHICLE SPEED ESTIMATION (dummy for now)
+# VEHICLE SPEED ESTIMATION (dummy)
 # =========================
 def estimate_speed(box, fps=30):
-    # ⚠️ Replace with real tracking logic later
-    return int(40 + (box[2] - box[0]) / 5)  # dummy formula
+    return int(40 + (box[2] - box[0]) / 5)  # dummy
 
 # =========================
 # DETECTION FUNCTION
@@ -42,7 +44,7 @@ def estimate_speed(box, fps=30):
 def run_detection(source):
     st.info("🚗 Running vehicle detection...")
 
-    model = YOLO("yolov8n.pt")  # Load YOLO model
+    model = YOLO("yolov8n.pt")
     cap = cv2.VideoCapture(source)
     vehicle_id = 0
 
@@ -73,7 +75,6 @@ def run_detection(source):
 
                 log_vehicle(vehicle_id, label, speed, overspeed, image_path)
 
-        # Show stream in Streamlit
         frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         st.image(frame_rgb, channels="RGB", use_container_width=True)
 
@@ -96,7 +97,6 @@ def dashboard():
     if "Timestamp" in df.columns:
         df["Timestamp"] = pd.to_datetime(df["Timestamp"], errors="coerce")
 
-    # Sidebar filters
     st.sidebar.header("🔍 Filters")
     vehicle_types = df["Vehicle_Type"].dropna().unique().tolist()
     selected_types = st.sidebar.multiselect("Vehicle Type", vehicle_types, default=vehicle_types)
@@ -113,7 +113,6 @@ def dashboard():
     global SPEED_LIMIT
     SPEED_LIMIT = st.sidebar.number_input("⚙️ Speed Limit (km/h)", min_value=10, max_value=200, value=60, step=5)
 
-    # Apply filters
     filtered_df = df[df["Vehicle_Type"].isin(selected_types)]
     if overspeed_filter != "All":
         filtered_df = filtered_df[filtered_df["Overspeed"] == overspeed_filter]
@@ -122,7 +121,6 @@ def dashboard():
     if not filtered_df.empty:
         filtered_df["Speed_Status"] = filtered_df["Overspeed"].apply(lambda x: "Overspeed" if x == "YES" else "Normal")
 
-    # Summary
     col1, col2, col3 = st.columns(3)
     with col1:
         st.metric("Total Vehicles", len(df))
@@ -132,7 +130,6 @@ def dashboard():
         avg_speed = round(df["Speed_km/h"].mean(), 2) if not df.empty else 0
         st.metric("Average Speed", avg_speed)
 
-    # Charts
     if not filtered_df.empty:
         chart1 = alt.Chart(filtered_df).mark_bar().encode(
             x="Vehicle_Type:N", y="count()", color="Vehicle_Type:N"
@@ -147,7 +144,6 @@ def dashboard():
         ).properties(title="Speed Distribution")
         st.altair_chart(chart2, use_container_width=True)
 
-    # Logbook
     st.subheader("📑 Vehicle Logbook (last 30)")
     st.dataframe(filtered_df.tail(30), use_container_width=True)
 
@@ -159,7 +155,6 @@ def dashboard():
             mime="text/csv"
         )
 
-    # Overspeed evidence
     st.subheader("🚨 Overspeed Evidence Gallery")
     overspeed_df = filtered_df[filtered_df["Overspeed"] == "YES"].dropna(subset=["Image_Path"])
     if not overspeed_df.empty:
@@ -187,25 +182,30 @@ mode = st.sidebar.radio("Choose Mode:", ["Dashboard", "Run Detection"])
 
 if mode == "Run Detection":
     st.sidebar.subheader("🎥 Detection Source")
-    source_choice = st.sidebar.radio("Select source:", ["Webcam", "Upload Video"])
+    source_choice = st.sidebar.radio("Select source:", ["Webcam", "Upload Video", "Demo Video"])
 
     if source_choice == "Webcam":
         if st.button("▶ Start Webcam Detection"):
             st.session_state["stop_detection"] = False
-            run_detection(0)  # webcam
+            run_detection(0)
         if st.button("⏹ Stop Detection"):
             st.session_state["stop_detection"] = True
 
     elif source_choice == "Upload Video":
         uploaded_file = st.file_uploader("Upload a video file", type=["mp4", "avi", "mov"])
         if uploaded_file is not None:
-            # Save to a temporary file
             with tempfile.NamedTemporaryFile(delete=False) as tmpfile:
                 tmpfile.write(uploaded_file.read())
                 tmp_path = tmpfile.name
-
             if st.button("▶ Start Video Detection"):
                 run_detection(tmp_path)
+
+    elif source_choice == "Demo Video":
+        if not os.path.exists(DEMO_VIDEO_PATH):
+            st.info("📥 Downloading demo video...")
+            urllib.request.urlretrieve(DEMO_VIDEO_URL, DEMO_VIDEO_PATH)
+        if st.button("▶ Start Demo Video Detection"):
+            run_detection(DEMO_VIDEO_PATH)
 
 else:
     dashboard()
