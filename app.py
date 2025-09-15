@@ -18,13 +18,9 @@ if not os.path.exists(logbook_file):
 # ===== Load YOLO model once =====
 @st.cache_resource
 def load_model():
-    return YOLO("yolov8n.pt")  # nano for speed
+    return YOLO("yolov8n.pt")  # nano model for speed
 
 model = load_model()
-
-# ===== Fake speed function =====
-def estimate_speed():
-    return round(20 + 80 * (time.time() % 1), 2)
 
 # ===== Initialize session state =====
 if "detecting" not in st.session_state:
@@ -35,6 +31,10 @@ if "cap" not in st.session_state:
     st.session_state.cap = None
 if "frame_num" not in st.session_state:
     st.session_state.frame_num = 0
+if "vehicle_tracks" not in st.session_state:
+    st.session_state.vehicle_tracks = {}
+if "vehicle_id_counter" not in st.session_state:
+    st.session_state.vehicle_id_counter = 0
 
 # ===== Streamlit UI =====
 st.set_page_config(page_title="Traffic Monitoring System", layout="wide")
@@ -76,9 +76,18 @@ with tab1:
             progress_bar = st.progress(0)
             total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
 
-    # Detection Loop
+    # Detection Loop with Realistic Speed
     if st.session_state.detecting and st.session_state.cap:
         cap = st.session_state.cap
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        if fps == 0:
+            fps = 30
+        frame_time = 1 / fps
+        meters_per_pixel = 0.05  # adjust according to camera
+
+        progress_bar = st.empty() if mode == "Upload Video" else None
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) if mode == "Upload Video" else None
+
         while st.session_state.detecting:
             ret, frame = cap.read()
             if not ret:
@@ -88,30 +97,66 @@ with tab1:
                 break
 
             results = model(frame)
+            new_tracks = {}
 
             for r in results:
                 for box in r.boxes:
                     cls_id = int(box.cls[0])
                     label = model.names[cls_id]
-                    speed = estimate_speed()
 
+                    # Centroid
                     x1, y1, x2, y2 = map(int, box.xyxy[0])
+                    cx = (x1 + x2) / 2
+                    cy = (y1 + y2) / 2
+                    centroid = (cx, cy)
+
+                    # Match with previous tracks
+                    matched_id = None
+                    min_dist = float("inf")
+                    for vid, prev_c in st.session_state.vehicle_tracks.items():
+                        dist = ((centroid[0] - prev_c[0])**2 + (centroid[1] - prev_c[1])**2)**0.5
+                        if dist < min_dist and dist < 50:  # pixels threshold
+                            min_dist = dist
+                            matched_id = vid
+
+                    if matched_id is None:
+                        st.session_state.vehicle_id_counter += 1
+                        matched_id = st.session_state.vehicle_id_counter
+
+                    # Speed calculation
+                    if matched_id in st.session_state.vehicle_tracks:
+                        prev_c = st.session_state.vehicle_tracks[matched_id]
+                        pixel_distance = ((centroid[0]-prev_c[0])**2 + (centroid[1]-prev_c[1])**2)**0.5
+                        distance_m = pixel_distance * meters_per_pixel
+                        speed_mps = distance_m / frame_time
+                        speed_kmph = speed_mps * 3.6
+                    else:
+                        speed_kmph = 0
+
+                    new_tracks[matched_id] = centroid
+
+                    # Draw box + speed
                     cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
-                    cv2.putText(frame, f"{label} {speed} km/h", (x1, y1 - 10),
+                    cv2.putText(frame, f"{label} {int(speed_kmph)} km/h", (x1, y1-10),
                                 cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
 
+                    # Save logbook
                     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                    new_data = pd.DataFrame([[timestamp, label, speed]],
+                    new_data = pd.DataFrame([[timestamp, label, int(speed_kmph)]],
                                             columns=["timestamp", "vehicle_type", "speed_kmph"])
                     new_data.to_csv(logbook_file, mode="a", header=False, index=False)
 
-                    if speed > 60:
-                        filename = f"overspeed_captures/{timestamp.replace(':','-')}_{label}_{speed}.jpg"
+                    # Overspeed capture
+                    speed_limit = 60
+                    if speed_kmph > speed_limit:
+                        filename = f"overspeed_captures/{timestamp.replace(':','-')}_{label}_{int(speed_kmph)}.jpg"
                         cv2.imwrite(filename, frame)
 
+            st.session_state.vehicle_tracks = new_tracks
             stframe.image(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB), channels="RGB")
 
-            if mode == "Upload Video":
+            # Update progress bar
+            if mode == "Upload Video" and progress_bar:
                 st.session_state.frame_num += 1
                 progress_bar.progress(min(st.session_state.frame_num / total_frames, 1.0))
 
@@ -127,22 +172,13 @@ with tab1:
 # ====================== Dashboard Tab ==========================
 with tab2:
     st.subheader("Traffic Monitoring Dashboard")
-    # Use st.autorefresh safely if available
     try:
         st.autorefresh(interval=5000, key="refresh_dashboard")
     except AttributeError:
-        st.info("Manual refresh required (update Streamlit to >=1.26 for auto-refresh).")
+        st.info("Manual refresh required (Streamlit >=1.26 for auto-refresh).")
 
     if os.path.exists(logbook_file):
-        try:
-            df = pd.read_csv(logbook_file)
-            expected_cols = ["timestamp", "vehicle_type", "speed_kmph"]
-            if list(df.columns) != expected_cols:
-                df = pd.DataFrame(columns=expected_cols)
-                df.to_csv(logbook_file, index=False)
-        except:
-            df = pd.DataFrame(columns=["timestamp", "vehicle_type", "speed_kmph"])
-
+        df = pd.read_csv(logbook_file)
         if not df.empty:
             st.write("### Latest Entries")
             st.dataframe(df.tail(10))
@@ -165,8 +201,8 @@ with tab2:
                 st.altair_chart(chart_speed, use_container_width=True)
 
             st.download_button(
-                label="📥 Download Full Logbook (CSV)",
-                data=df.to_csv(index=False).encode("utf-8"),
+                "📥 Download Full Logbook (CSV)",
+                df.to_csv(index=False).encode("utf-8"),
                 file_name="traffic_logbook.csv",
                 mime="text/csv"
             )
@@ -176,11 +212,9 @@ with tab2:
         st.error("⚠️ No logbook found. Run detection first.")
 
     if st.button("🗑️ Clear All Data"):
-        df_empty = pd.DataFrame(columns=["timestamp", "vehicle_type", "speed_kmph"])
-        df_empty.to_csv(logbook_file, index=False)
-        if os.path.exists("overspeed_captures"):
-            for f in os.listdir("overspeed_captures"):
-                os.remove(os.path.join("overspeed_captures", f))
+        pd.DataFrame(columns=["timestamp", "vehicle_type", "speed_kmph"]).to_csv(logbook_file, index=False)
+        for f in os.listdir("overspeed_captures"):
+            os.remove(os.path.join("overspeed_captures", f))
         st.session_state.frame_num = 0
         st.success("✅ Logbook reset and overspeed captures cleared!")
 
@@ -191,7 +225,7 @@ with tab3:
     try:
         st.autorefresh(interval=7000, key="refresh_gallery")
     except AttributeError:
-        st.info("Manual refresh required (update Streamlit to >=1.26 for auto-refresh).")
+        st.info("Manual refresh required (Streamlit >=1.26 for auto-refresh).")
 
     image_files = sorted([f for f in os.listdir("overspeed_captures") if f.endswith(".jpg")])
     if image_files:
