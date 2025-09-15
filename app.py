@@ -132,7 +132,7 @@ with tab1:
 # ====================== Dashboard Tab ==========================
 with tab2:
     st.subheader("Traffic Monitoring Dashboard")
-    st.experimental_autorefresh(interval=5000, key="refresh_dashboard")
+    st.autorefresh(interval=5000, key="refresh_dashboard")  # <-- Updated here
 
     if os.path.exists(logbook_file):
         try:
@@ -190,7 +190,7 @@ with tab2:
 # ====================== Overspeed Gallery Tab ==========================
 with tab3:
     st.subheader("📷 Overspeed Captures Gallery")
-    st.experimental_autorefresh(interval=7000, key="refresh_gallery")
+    st.autorefresh(interval=7000, key="refresh_gallery")  # <-- Updated here
 
     image_files = sorted([f for f in os.listdir("overspeed_captures") if f.endswith(".jpg")])
     if image_files:
