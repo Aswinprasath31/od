@@ -36,6 +36,8 @@ if "vehicle_tracks" not in st.session_state:
     st.session_state.vehicle_tracks = {}
 if "vehicle_id_counter" not in st.session_state:
     st.session_state.vehicle_id_counter = 0
+if "vehicle_speeds" not in st.session_state:
+    st.session_state.vehicle_speeds = {}  # {vehicle_id: [speed1, speed2, ...]}
 
 # ===== Streamlit UI =====
 st.set_page_config(page_title="Traffic Monitoring System", layout="wide")
@@ -125,9 +127,16 @@ with tab1:
                         pixel_distance = ((cx - prev_c[0])**2 + (cy - prev_c[1])**2)**0.5
                         distance_m = pixel_distance * meters_per_pixel
                         speed_mps = distance_m / frame_time
-                        speed_kmph = speed_mps * 3.6
+                        speed_kmph_raw = speed_mps * 3.6
                     else:
-                        speed_kmph = 0
+                        speed_kmph_raw = 0
+
+                    # ---- Moving average over last 3 frames ----
+                    if matched_id not in st.session_state.vehicle_speeds:
+                        st.session_state.vehicle_speeds[matched_id] = []
+                    st.session_state.vehicle_speeds[matched_id].append(speed_kmph_raw)
+                    st.session_state.vehicle_speeds[matched_id] = st.session_state.vehicle_speeds[matched_id][-3:]
+                    speed_kmph = sum(st.session_state.vehicle_speeds[matched_id]) / len(st.session_state.vehicle_speeds[matched_id])
 
                     new_tracks[matched_id] = centroid
 
