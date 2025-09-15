@@ -6,6 +6,7 @@ import streamlit as st
 import altair as alt
 from datetime import datetime
 from ultralytics import YOLO
+import re  # for robust speed parsing
 
 # ===== AUTO-CREATE FOLDER + CSV =====
 os.makedirs("overspeed_captures", exist_ok=True)
@@ -42,30 +43,29 @@ st.title("🚦 Traffic Monitoring System")
 
 tab1, tab2, tab3 = st.tabs(["📡 Detection", "📊 Dashboard", "📷 Overspeed Gallery"])
 
-# -------------------------------------------------------------------
 # ====================== Detection Tab ==========================
 with tab1:
     st.subheader("YOLO Vehicle Detection + Speed Estimation")
-
     status_text = "🟢 Running" if st.session_state.detecting else "🔴 Stopped"
     st.markdown(f"**Status:** {status_text}")
 
     mode = st.radio("Select Input Source", ["Webcam", "Upload Video"])
     stframe = st.empty()
 
-    # Webcam Mode
+    speed_limit = 60  # km/h
+
+    # Webcam
     if mode == "Webcam":
         if st.button("▶️ Start Webcam Detection") and not st.session_state.detecting:
             st.session_state.cap = cv2.VideoCapture(0)
             st.session_state.detecting = True
 
-    # Upload Video Mode
+    # Upload Video
     else:
         uploaded_file = st.file_uploader("Upload a video", type=["mp4", "avi", "mov"])
         if uploaded_file:
             st.session_state.uploaded_video = uploaded_file
             st.session_state.frame_num = 0
-
         if st.session_state.uploaded_video and not st.session_state.detecting:
             tfile = "temp_video.mp4"
             with open(tfile, "wb") as f:
@@ -76,15 +76,12 @@ with tab1:
             progress_bar = st.progress(0)
             total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
 
-    # Detection Loop with Realistic Speed
+    # Detection Loop
     if st.session_state.detecting and st.session_state.cap:
         cap = st.session_state.cap
-        fps = cap.get(cv2.CAP_PROP_FPS)
-        if fps == 0:
-            fps = 30
+        fps = cap.get(cv2.CAP_PROP_FPS) or 30
         frame_time = 1 / fps
-        meters_per_pixel = 0.05  # adjust according to camera
-        speed_limit = 60  # km/h
+        meters_per_pixel = 0.05
 
         progress_bar = st.empty() if mode == "Upload Video" else None
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) if mode == "Upload Video" else None
@@ -107,19 +104,17 @@ with tab1:
 
                     # Centroid
                     x1, y1, x2, y2 = map(int, box.xyxy[0])
-                    cx = (x1 + x2) / 2
-                    cy = (y1 + y2) / 2
+                    cx, cy = (x1 + x2) / 2, (y1 + y2) / 2
                     centroid = (cx, cy)
 
-                    # Match with previous tracks
+                    # Track matching
                     matched_id = None
                     min_dist = float("inf")
                     for vid, prev_c in st.session_state.vehicle_tracks.items():
-                        dist = ((centroid[0] - prev_c[0])**2 + (centroid[1] - prev_c[1])**2)**0.5
-                        if dist < min_dist and dist < 50:  # pixels threshold
+                        dist = ((cx - prev_c[0])**2 + (cy - prev_c[1])**2)**0.5
+                        if dist < min_dist and dist < 50:
                             min_dist = dist
                             matched_id = vid
-
                     if matched_id is None:
                         st.session_state.vehicle_id_counter += 1
                         matched_id = st.session_state.vehicle_id_counter
@@ -127,7 +122,7 @@ with tab1:
                     # Speed calculation
                     if matched_id in st.session_state.vehicle_tracks:
                         prev_c = st.session_state.vehicle_tracks[matched_id]
-                        pixel_distance = ((centroid[0]-prev_c[0])**2 + (centroid[1]-prev_c[1])**2)**0.5
+                        pixel_distance = ((cx - prev_c[0])**2 + (cy - prev_c[1])**2)**0.5
                         distance_m = pixel_distance * meters_per_pixel
                         speed_mps = distance_m / frame_time
                         speed_kmph = speed_mps * 3.6
@@ -143,9 +138,9 @@ with tab1:
 
                     # Save logbook
                     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                    new_data = pd.DataFrame([[timestamp, label, int(speed_kmph)]],
-                                            columns=["timestamp", "vehicle_type", "speed_kmph"])
-                    new_data.to_csv(logbook_file, mode="a", header=False, index=False)
+                    pd.DataFrame([[timestamp, label, int(speed_kmph)]],
+                                 columns=["timestamp", "vehicle_type", "speed_kmph"]).to_csv(
+                                 logbook_file, mode="a", header=False, index=False)
 
                     # Overspeed capture
                     if speed_kmph > speed_limit:
@@ -155,12 +150,11 @@ with tab1:
             st.session_state.vehicle_tracks = new_tracks
             stframe.image(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB), channels="RGB")
 
-            # Update progress bar
+            # Progress
             if mode == "Upload Video" and progress_bar:
                 st.session_state.frame_num += 1
                 progress_bar.progress(min(st.session_state.frame_num / total_frames, 1.0))
 
-    # Stop Button
     if st.session_state.detecting and st.button("⏹️ Stop Detection"):
         st.session_state.detecting = False
         if st.session_state.cap:
@@ -168,14 +162,13 @@ with tab1:
             st.session_state.cap = None
         st.success("✅ Detection stopped.")
 
-# -------------------------------------------------------------------
 # ====================== Dashboard Tab ==========================
 with tab2:
     st.subheader("Traffic Monitoring Dashboard")
     try:
         st.autorefresh(interval=5000, key="refresh_dashboard")
     except AttributeError:
-        st.info("Manual refresh required (Streamlit >=1.26 for auto-refresh).")
+        st.info("Manual refresh required (Streamlit >=1.26).")
 
     if os.path.exists(logbook_file):
         df = pd.read_csv(logbook_file)
@@ -218,19 +211,24 @@ with tab2:
         st.session_state.frame_num = 0
         st.success("✅ Logbook reset and overspeed captures cleared!")
 
-# -------------------------------------------------------------------
 # ====================== Overspeed Gallery Tab ==========================
 with tab3:
     st.subheader("📷 Overspeed Captures Gallery")
     try:
         st.autorefresh(interval=7000, key="refresh_gallery")
     except AttributeError:
-        st.info("Manual refresh required (Streamlit >=1.26 for auto-refresh).")
+        st.info("Manual refresh required (Streamlit >=1.26).")
 
-    speed_limit = 60
-    image_files = sorted([f for f in os.listdir("overspeed_captures") 
-                          if f.endswith(".jpg") and int(f.split("_")[-1].replace(".jpg","")) > speed_limit])
-    
+    image_files = []
+    for f in os.listdir("overspeed_captures"):
+        if f.endswith(".jpg"):
+            m = re.search(r"_(\d+)\.jpg$", f)
+            if m:
+                speed = int(m.group(1))
+                if speed > speed_limit:
+                    image_files.append(f)
+    image_files = sorted(image_files)
+
     if image_files:
         for img_file in image_files:
             img_path = os.path.join("overspeed_captures", img_file)
