@@ -84,6 +84,7 @@ with tab1:
             fps = 30
         frame_time = 1 / fps
         meters_per_pixel = 0.05  # adjust according to camera
+        speed_limit = 60  # km/h
 
         progress_bar = st.empty() if mode == "Upload Video" else None
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) if mode == "Upload Video" else None
@@ -147,7 +148,6 @@ with tab1:
                     new_data.to_csv(logbook_file, mode="a", header=False, index=False)
 
                     # Overspeed capture
-                    speed_limit = 60
                     if speed_kmph > speed_limit:
                         filename = f"overspeed_captures/{timestamp.replace(':','-')}_{label}_{int(speed_kmph)}.jpg"
                         cv2.imwrite(filename, frame)
@@ -227,12 +227,16 @@ with tab3:
     except AttributeError:
         st.info("Manual refresh required (Streamlit >=1.26 for auto-refresh).")
 
-    image_files = sorted([f for f in os.listdir("overspeed_captures") if f.endswith(".jpg")])
+    speed_limit = 60
+    image_files = sorted([f for f in os.listdir("overspeed_captures") 
+                          if f.endswith(".jpg") and int(f.split("_")[-1].replace(".jpg","")) > speed_limit])
+    
     if image_files:
-        cols = st.columns(3)
-        for idx, img_file in enumerate(image_files):
+        for img_file in image_files:
             img_path = os.path.join("overspeed_captures", img_file)
-            with cols[idx % 3]:
-                st.image(img_path, caption=img_file, use_container_width=True)
+            st.image(img_path, caption=img_file, use_container_width=True)
+            if st.button(f"🗑️ Delete {img_file}"):
+                os.remove(img_path)
+                st.experimental_rerun()
     else:
-        st.info("No overspeed captures yet. Run detection and exceed speed limit to see images.")
+        st.info("No overspeed captures yet. Run detection and exceed 60 km/h to see images.")
